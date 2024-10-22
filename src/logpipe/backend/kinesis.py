@@ -9,6 +9,7 @@ from botocore.exceptions import ClientError
 from django.apps import apps
 from lru import LRU
 import boto3
+from logpipe.exceptions import LogPipeError
 
 from .. import settings
 from ..abc import (
@@ -248,7 +249,7 @@ class Consumer(KinesisBase, ConsumerBackend):
         logger.warning(
             "After {} attempts, couldn't get records from Kinesis. Giving up.".format(i)
         )
-        return None
+        raise LogPipeError("Unhealthy kinesis backend")
 
     def _list_shard_ids(self) -> list[ShardID]:
         resp = self.client.describe_stream(StreamName=self.topic_name)
