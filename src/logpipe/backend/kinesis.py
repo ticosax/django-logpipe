@@ -150,7 +150,17 @@ class Consumer(KinesisBase, ConsumerBackend):
                 break
 
         # If we've tried all the shards and still don't have any records, stop iteration
-        if len(self.records) == 0:
+        if (
+            len(self.records) == 0
+            and (
+                long_polling_wait_time := settings.get("KINESIS_LONG_POLLING_WAIT_TIME")
+            )
+            is not None
+        ):
+            logger.debug(
+                f"No records found in all shards. pause {long_polling_wait_time}s"
+            )
+            time.sleep(long_polling_wait_time)
             raise StopIteration()
 
         # Return the left most record in the queue
