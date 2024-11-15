@@ -56,6 +56,7 @@ LOGPIPE = {
     # 'MIN_MESSAGE_LAG_MS': 0,
     # 'DEFAULT_FORMAT': 'json',
     # 'PRODUCER_ID': 'my-application-name',
+    # 'KINESIS_SHARD_ITERATOR_TYPE': "LATEST" | "TRIM_HORIZON" (default)
 }
 ```
 
