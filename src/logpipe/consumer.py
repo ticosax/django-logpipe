@@ -1,7 +1,7 @@
-from typing import Any, Generator, Iterator
-import itertools
+import concurrent.futures
 import logging
 import time
+from typing import Any, Generator, Iterator
 
 from django.db import models, transaction
 from rest_framework import serializers
@@ -66,27 +66,24 @@ class Consumer(Iterator[tuple[Record, Serializer]]):
         self.serializer_classes[message_type][version] = serializer_class
 
     def run(self, iter_limit: int = 0) -> None:
-        i = 0
-        for message, serializer in self:
-            with transaction.atomic():
-                try:
-                    serializer.save()
-                    self.commit(message)
-                except Exception as e:
-                    info = (
-                        message.key,
-                        message.topic,
-                        message.partition,
-                        message.offset,
-                    )
-                    logger.exception(
-                        'Failed to process message with key "%s" from topic "%s", partition "%s", offset "%s"'
-                        % info
-                    )
-                    raise e
-            i += 1
-            if iter_limit > 0 and i >= iter_limit:
-                break
+        while True:
+            for message, serializer in self:
+                with transaction.atomic():
+                    try:
+                        serializer.save()
+                        self.commit(message)
+                    except Exception as e:
+                        info = (
+                            message.key,
+                            message.topic,
+                            message.partition,
+                            message.offset,
+                        )
+                        logger.exception(
+                            'Failed to process message with key "%s" from topic "%s", partition "%s", offset "%s"'
+                            % info
+                        )
+                        raise e
 
     def _error_handler(self) -> Generator[tuple[Record, Serializer], None, None]:
         while True:
@@ -278,9 +275,8 @@ class MultiConsumer:
         self.consumers = list(consumers)
 
     def run(self, iter_limit: int = 0) -> None:
-        i = 0
-        for consumer in itertools.cycle(self.consumers):
-            consumer.run(iter_limit=1)
-            i += 1
-            if iter_limit > 0 and i >= iter_limit:
-                break
+        num_consumers = len(self.consumers)
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=num_consumers)
+        futures = {executor.submit(consumer.run) for consumer in self.consumers}
+        # Block forever
+        concurrent.futures.as_completed(futures)
