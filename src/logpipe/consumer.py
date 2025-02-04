@@ -1,7 +1,8 @@
-from typing import Any, Generator, Iterator, TypeVar, cast
-import itertools
+import concurrent.futures
 import logging
 import time
+from threading import Event
+from typing import Any, Generator, Iterator, TypeVar, cast
 
 from django.db import models, transaction
 from rest_framework import serializers
@@ -68,28 +69,27 @@ class Consumer(Iterator[tuple[Record, Serializer]]):
             self.serializer_classes[message_type] = {}
         self.serializer_classes[message_type][version] = serializer_class
 
-    def run(self, iter_limit: int = 0) -> None:
-        i = 0
-        for message, serializer in self:
-            with transaction.atomic():
-                try:
-                    serializer.save()
-                    self.commit(message)
-                except Exception as e:
-                    info = (
-                        message.key,
-                        message.topic,
-                        message.partition,
-                        message.offset,
-                    )
-                    logger.exception(
-                        'Failed to process message with key "%s" from topic "%s", partition "%s", offset "%s"'
-                        % info
-                    )
-                    raise e
-            i += 1
-            if iter_limit > 0 and i >= iter_limit:
-                break
+    def run(self, stop_event: Event, iter_limit: int = 0) -> None:
+        while not stop_event.is_set():
+            for message, serializer in self:
+                with transaction.atomic():
+                    try:
+                        serializer.save()
+                        self.commit(message)
+                    except Exception as e:
+                        info = (
+                            message.key,
+                            message.topic,
+                            message.partition,
+                            message.offset,
+                        )
+                        logger.exception(
+                            'Failed to process message with key "%s" from topic "%s", partition "%s", offset "%s"'
+                            % info
+                        )
+                        raise e
+                if stop_event.is_set():
+                    break
 
     def _error_handler(self) -> Generator[tuple[Record, Serializer], None, None]:
         while True:
@@ -284,9 +284,22 @@ class MultiConsumer:
         self.consumers = list(consumers)
 
     def run(self, iter_limit: int = 0) -> None:
-        i = 0
-        for consumer in itertools.cycle(self.consumers):
-            consumer.run(iter_limit=1)
-            i += 1
-            if iter_limit > 0 and i >= iter_limit:
-                break
+        num_consumers = len(self.consumers)
+        stop_event = Event()
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=num_consumers)
+        futures = {
+            executor.submit(consumer.run, stop_event): consumer
+            for consumer in self.consumers
+        }
+        # Block until one of the consumer fails
+        for fut in concurrent.futures.as_completed(futures):
+            consumer = futures[fut]
+            try:
+                _ = fut.result()
+            except Exception:
+                logger.exception(
+                    "Consumer failed, abort: topic [%s]", consumer.consumer.topic_name
+                )
+                stop_event.set()
+                executor.shutdown(wait=True, cancel_futures=True)
+                raise
