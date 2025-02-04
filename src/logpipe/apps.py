@@ -7,3 +7,4 @@ class LogpipeConfig(AppConfig):
     label = "logpipe"
     # Translators: Backend Library Name
     verbose_name = _("LogPipe")
+    default_auto_field = "django.db.models.AutoField"
