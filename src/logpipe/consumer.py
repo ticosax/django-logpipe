@@ -4,9 +4,9 @@ import time
 from threading import Event
 from typing import Any, Generator, Iterator, TypeVar, cast
 
+import pydantic_core
 from django.db import models, transaction
 from rest_framework import serializers
-import pydantic_core
 
 from . import settings
 from .abc import (
@@ -90,6 +90,9 @@ class Consumer(Iterator[tuple[Record, Serializer]]):
                         raise e
                 if stop_event.is_set():
                     break
+            if pause := settings.get("KINESIS_LONG_POLLING_WAIT_TIME", 0):
+                logger.debug("pause between pages %ds", pause)
+                time.sleep(pause)
 
     def _error_handler(self) -> Generator[tuple[Record, Serializer], None, None]:
         while True:
