@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 import collections
 import logging
 import time
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
+import boto3
 from botocore.exceptions import ClientError
 from django.apps import apps
 from lru import LRU
-import boto3
 
 from .. import settings
 from ..abc import (
@@ -127,18 +127,18 @@ class Consumer(KinesisBase, ConsumerBackend):
 
     def __next__(self) -> Record:
         # Try and load records. Keep trying until either (1) we have some records or (2) current_lag drops to 0
-        while len(self.records) <= 0:
+        while not len(self.records):
             # Load a page from each shard and sum the shard lags
             current_lag = 0
             for i in range(len(self.shards)):
                 current_lag += self._load_next_page()
 
             # If all shards report 0 lag, then give up trying to load records
-            if current_lag <= 0:
+            if current_lag == 0:
                 break
 
         # If we've tried all the shards and still don't have any records, stop iteration
-        if len(self.records) == 0:
+        if not len(self.records):
             raise StopIteration()
 
         # Return the left most record in the queue
