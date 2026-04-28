@@ -1,3 +1,4 @@
+from functools import cache
 from typing import Any
 import os
 
@@ -11,6 +12,7 @@ def get(key: str, default: Any = None) -> Any:
     return settings.LOGPIPE.get(key, default)
 
 
+@cache
 def get_aws_region(_default: str = "us-east-1") -> str:
     # Try to use the explicit KINESIS_REGION setting
     region = get("KINESIS_REGION", "")
