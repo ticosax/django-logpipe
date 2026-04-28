@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 import collections
 import logging
 import time
-from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
-import boto3
 from botocore.exceptions import ClientError
 from django.apps import apps
 from lru import LRU
+import boto3
+
+from logpipe.exceptions import LogPipeError
 
 from .. import settings
 from ..abc import (
@@ -154,7 +156,7 @@ class Consumer(KinesisBase, ConsumerBackend):
         # Get the next shard iterator for the shard
         shard_iter = self.shard_iters.pop(shard, None)
         if not shard_iter:
-            return 0
+            raise LogPipeError("Unable to obtain messages from the stream")
 
         # Fetch the records from Kinesis
         logger.debug("Loading page of records from %s.%s", self.topic_name, shard)
