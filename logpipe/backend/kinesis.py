@@ -10,7 +10,7 @@ from django.apps import apps
 from lru import LRU
 import boto3
 
-from logpipe.exceptions import LogPipeError
+from logpipe.exceptions import LogPipeError, ShardProvisionedThroughputExceededError
 
 from .. import settings
 from ..abc import (
@@ -162,15 +162,9 @@ class Consumer(KinesisBase, ConsumerBackend):
         logger.debug("Loading page of records from %s.%s", self.topic_name, shard)
         fetch_limit = settings.get("KINESIS_FETCH_LIMIT", 25)
         response = self._get_records(shard_iter, fetch_limit)
-        if response is None:
-            return 0
-
         # This default value is mostly just for testing with Moto. Real Kinesis should always return a value for MillisBehindLatest.
         num_records = len(response["Records"])
-        if "MillisBehindLatest" in response:
-            current_stream_lag = response["MillisBehindLatest"]
-        else:
-            current_stream_lag = 0 if num_records == 0 else 1
+        current_stream_lag = response["MillisBehindLatest"]
         logger.debug(f"Loaded {num_records} records from {self.topic_name}.{shard}. Currently {current_stream_lag}ms behind stream head.")
 
         # Add the records page into the queue
@@ -202,21 +196,21 @@ class Consumer(KinesisBase, ConsumerBackend):
         shard_iter: ShardIterator,
         fetch_limit: int,
         retries: int = 1,
-    ) -> GetRecordsOutputTypeDef | None:
-        i = 0
-        while i <= retries:
+    ) -> GetRecordsOutputTypeDef:
+        for _ in range(retries):
             try:
                 response = self.client.get_records(ShardIterator=shard_iter, Limit=fetch_limit)
-                return response
             except ClientError as e:
                 if e.response["Error"]["Code"] == "ProvisionedThroughputExceededException":
                     logger.warning("Caught ProvisionedThroughputExceededException. Sleeping for 5 seconds.")
                     time.sleep(5)
                 else:
-                    logger.warning("Received {} from AWS API: {}".format(e.response["Error"]["Code"], e.response["Error"]["Message"]))
-            i += 1
-        logger.warning(f"After {i} attempts, couldn't get records from Kinesis. Giving up.")
-        return None
+                    # resurface all other error,s as we don't have established yet,
+                    # a suitable retry strategy for them.
+                    raise
+            else:
+                return response
+        raise ShardProvisionedThroughputExceededError(retries)
 
     def _list_shard_ids(self) -> list[ShardID]:
         resp = self.client.describe_stream(StreamName=self.topic_name)

@@ -43,3 +43,13 @@ class ValidationError(LogPipeMessageError, serializers.ValidationError):
 
 class MissingTopicError(LogPipeError):
     pass
+
+
+class ShardProvisionedThroughputExceededError(LogPipeError):
+    """
+    Shard exhausted its provisioned throughput capacity.
+    We failed to recover from this error after n retry with 5s waiting time.
+    """
+
+    def __init__(self, retries: int):
+        self.message = f"After {retries} attempt{'s' if retries else ''}, we couldn't get records from Kinesis. Giving up."
